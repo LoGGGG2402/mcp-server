@@ -41,10 +41,16 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
                     )
                 )
 
+                val allowExternalAccess = allowsExternalAccess(config.host)
+                
                 server = embeddedServer(Netty, port = config.port, host = config.host) {
                     install(CORS) {
-                        allowHost("localhost:${config.port}")
-                        allowHost("127.0.0.1:${config.port}")
+                        if (allowExternalAccess) {
+                            anyHost()
+                        } else {
+                            allowHost("localhost:${config.port}")
+                            allowHost("127.0.0.1:${config.port}")
+                        }
 
                         allowMethod(HttpMethod.Get)
                         allowMethod(HttpMethod.Post)
@@ -59,31 +65,34 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
                     }
 
                     intercept(ApplicationCallPipeline.Call) {
-                        val origin = call.request.header("Origin")
-                        val host = call.request.header("Host")
-                        val referer = call.request.header("Referer")
-                        val userAgent = call.request.header("User-Agent")
+                        // Only apply strict security checks if external access is not allowed
+                        if (!allowExternalAccess) {
+                            val origin = call.request.header("Origin")
+                            val host = call.request.header("Host")
+                            val referer = call.request.header("Referer")
+                            val userAgent = call.request.header("User-Agent")
 
-                        if (origin != null && !isValidOrigin(origin)) {
-                            api.logging().logToOutput("Blocked DNS rebinding attack from origin: $origin")
-                            call.respond(HttpStatusCode.Forbidden)
-                            return@intercept
-                        } else if (isBrowserRequest(userAgent)) {
-                            api.logging().logToOutput("Blocked browser request without Origin header")
-                            call.respond(HttpStatusCode.Forbidden)
-                            return@intercept
-                        }
+                            if (origin != null && !isValidOrigin(origin)) {
+                                api.logging().logToOutput("Blocked DNS rebinding attack from origin: $origin")
+                                call.respond(HttpStatusCode.Forbidden)
+                                return@intercept
+                            } else if (isBrowserRequest(userAgent)) {
+                                api.logging().logToOutput("Blocked browser request without Origin header")
+                                call.respond(HttpStatusCode.Forbidden)
+                                return@intercept
+                            }
 
-                        if (host != null && !isValidHost(host, config.port)) {
-                            api.logging().logToOutput("Blocked DNS rebinding attack from host: $host")
-                            call.respond(HttpStatusCode.Forbidden)
-                            return@intercept
-                        }
+                            if (host != null && !isValidHost(host, config.port)) {
+                                api.logging().logToOutput("Blocked DNS rebinding attack from host: $host")
+                                call.respond(HttpStatusCode.Forbidden)
+                                return@intercept
+                            }
 
-                        if (referer != null && !isValidReferer(referer)) {
-                            api.logging().logToOutput("Blocked suspicious request from referer: $referer")
-                            call.respond(HttpStatusCode.Forbidden)
-                            return@intercept
+                            if (referer != null && !isValidReferer(referer)) {
+                                api.logging().logToOutput("Blocked suspicious request from referer: $referer")
+                                call.respond(HttpStatusCode.Forbidden)
+                                return@intercept
+                            }
                         }
 
                         call.response.header("X-Frame-Options", "DENY")
@@ -133,6 +142,12 @@ class KtorServerManager(private val api: MontoyaApi) : ServerManager {
 
         executor.shutdown()
         executor.awaitTermination(10, TimeUnit.SECONDS)
+    }
+
+    private fun allowsExternalAccess(host: String): Boolean {
+        val hostLower = host.trim().lowercase()
+        return hostLower == "0.0.0.0" || 
+               (hostLower != "localhost" && hostLower != "127.0.0.1" && hostLower.isNotEmpty())
     }
 
     private fun isValidOrigin(origin: String): Boolean {

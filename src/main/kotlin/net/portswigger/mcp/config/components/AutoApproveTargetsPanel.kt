@@ -228,7 +228,14 @@ class AutoApproveTargetsPanel(private val config: McpConfig) : JPanel() {
                 if (!input.isNullOrBlank()) {
                     val trimmed = input.trim()
                     if (TargetValidation.isValidTarget(trimmed)) {
-                        addTarget(trimmed)
+                        val success = addTarget(trimmed)
+                        if (!success) {
+                            Dialogs.showMessageDialog(
+                                findBurpFrame(),
+                                "Target already exists or could not be added.",
+                                ERROR_MESSAGE
+                            )
+                        }
                     } else {
                         Dialogs.showMessageDialog(
                             findBurpFrame(),
@@ -276,8 +283,8 @@ class AutoApproveTargetsPanel(private val config: McpConfig) : JPanel() {
     }
 
 
-    private fun addTarget(target: String) {
-        config.addAutoApproveTarget(target)
+    private fun addTarget(target: String): Boolean {
+        return config.addAutoApproveTarget(target)
     }
 
     private fun removeTarget(index: Int, listModel: DefaultListModel<String>) {
